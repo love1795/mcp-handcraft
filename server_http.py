@@ -15,6 +15,7 @@ import tempfile
 import threading
 import time
 import uuid
+import shutil
 import urllib.parse
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from socketserver import ThreadingMixIn
@@ -22,11 +23,11 @@ from socketserver import ThreadingMixIn
 class ThreadingHTTPServer(ThreadingMixIn, HTTPServer):
     daemon_threads = True
 
-CODEX_CMD = r"C:\Users\Windows10-JS\AppData\Roaming\npm\codex.cmd"
-CLAUDE_CMD = r"C:\Users\Windows10-JS\AppData\Roaming\npm\claude.cmd"
-GEMINI_CMD = r"C:\Users\Windows10-JS\AppData\Roaming\npm\gemini.cmd"
-CODEX_DEFAULT_WORKDIR = r"C:\Users\Windows10-JS"
-AGENT_TIMEOUT_SECONDS = int(os.getenv("MCP_AGENT_TIMEOUT_SECONDS", "90"))
+CODEX_CMD = r"C:\Users\EdgarsTool\AppData\Roaming\npm\codex.cmd"
+CLAUDE_CMD = shutil.which("claude") or "claude"
+GEMINI_CMD = shutil.which("gemini") or "gemini"
+CODEX_DEFAULT_WORKDIR = r"C:\Users\EdgarsTool"
+AGENT_TIMEOUT_SECONDS = int(os.getenv("MCP_AGENT_TIMEOUT_SECONDS", "300"))
 
 PORT = 8765
 PROTOCOL_VERSION = "2025-11-25"
