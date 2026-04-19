@@ -22,6 +22,16 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 from socketserver import ThreadingMixIn
 from mmx_handlers import DISPATCH, hmi, hmvd, hms, hmu, hmv, hmsq, hmc, hmq
 
+# ── mmx handler aliases（對應 dispatch 的完整名稱）─────────────────────────────
+handle_mmx_image_generate   = hmi
+handle_mmx_video_generate   = hmv
+handle_mmx_speech_synthesize = hms
+handle_mmx_music_generate   = hmu
+handle_mmx_vision_describe  = hmvd
+handle_mmx_search_query     = hmsq
+handle_mmx_text_chat        = hmc
+handle_mmx_quota_show       = hmq
+
 class ThreadingHTTPServer(ThreadingMixIn, HTTPServer):
     daemon_threads = True
 
@@ -47,6 +57,11 @@ SERVER_INFO = {
 
 JOBS_LOCK = threading.Lock()
 JOBS: dict[str, dict] = {}
+
+# ── OAuth 2.0 一次性授權碼（記憶體暫存，重啟後清空）──────────────────────────
+OAUTH_CODES_LOCK = threading.Lock()
+OAUTH_CODES: dict[str, dict] = {}
+BASE_URL = os.getenv("MCP_BASE_URL", "https://mcp.whoasked.vip")
 
 TOOLS = [
     {
@@ -1005,20 +1020,28 @@ class MCPHTTPHandler(BaseHTTPRequestHandler):
 
     # ── GET（探索 / SSE 健康檢查）────────────────────────────────────────────
     def do_GET(self):
-        if self.path != "/mcp":
+        parsed = urllib.parse.urlparse(self.path)
+        path = parsed.path
+        if path == "/.well-known/oauth-authorization-server":
+            self._handle_oauth_metadata()
+        elif path == "/.well-known/oauth-protected-resource":
+            self._handle_resource_metadata()
+        elif path == "/authorize":
+            self._handle_authorize(parsed.query)
+        elif path == "/mcp":
+            body = json.dumps({
+                "server": SERVER_INFO,
+                "protocolVersion": PROTOCOL_VERSION,
+            }, ensure_ascii=False).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self._add_cors_headers()
+            self.end_headers()
+            self.wfile.write(body)
+        else:
             self.send_response(404)
             self.end_headers()
-            return
-        body = json.dumps({
-            "server": SERVER_INFO,
-            "protocolVersion": PROTOCOL_VERSION,
-        }, ensure_ascii=False).encode("utf-8")
-        self.send_response(200)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(body)))
-        self._add_cors_headers()
-        self.end_headers()
-        self.wfile.write(body)
 
     # ── CORS preflight ────────────────────────────────────────────────────────
     def do_OPTIONS(self):
@@ -1026,9 +1049,124 @@ class MCPHTTPHandler(BaseHTTPRequestHandler):
         self._add_cors_headers()
         self.end_headers()
 
+    # ── OAuth 2.0 helpers ────────────────────────────────────────────────────
+    def _send_oauth_json(self, data: dict, status: int = 200) -> None:
+        body = json.dumps(data, ensure_ascii=False).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self._add_cors_headers()
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _handle_oauth_metadata(self) -> None:
+        self._send_oauth_json({
+            "issuer": BASE_URL,
+            "authorization_endpoint": f"{BASE_URL}/authorize",
+            "token_endpoint": f"{BASE_URL}/token",
+            "registration_endpoint": f"{BASE_URL}/register",
+            "response_types_supported": ["code"],
+            "grant_types_supported": ["authorization_code"],
+            "code_challenge_methods_supported": ["S256", "plain"],
+            "token_endpoint_auth_methods_supported": ["none"],
+            "scopes_supported": ["mcp"],
+        })
+
+    def _handle_resource_metadata(self) -> None:
+        self._send_oauth_json({
+            "resource": BASE_URL,
+            "authorization_servers": [BASE_URL],
+        })
+
+    def _handle_authorize(self, query_string: str) -> None:
+        params = urllib.parse.parse_qs(query_string)
+        redirect_uri = params.get("redirect_uri", [""])[0]
+        state = params.get("state", [""])[0]
+        if not redirect_uri:
+            self.send_response(400)
+            self.end_headers()
+            return
+        code = str(uuid.uuid4())
+        code_verifier_challenge = params.get("code_challenge", [""])[0]
+        with OAUTH_CODES_LOCK:
+            OAUTH_CODES[code] = {
+                "created_at": time.time(),
+                "used": False,
+                "code_challenge": code_verifier_challenge,
+                "redirect_uri": redirect_uri,
+            }
+        sep = "&" if "?" in redirect_uri else "?"
+        location = f"{redirect_uri}{sep}code={urllib.parse.quote(code)}"
+        if state:
+            location += f"&state={urllib.parse.quote(state)}"
+        log(f"OAuth /authorize → redirect to {redirect_uri[:60]}...")
+        self.send_response(302)
+        self.send_header("Location", location)
+        self._add_cors_headers()
+        self.end_headers()
+
+    def _handle_token(self) -> None:
+        content_length = int(self.headers.get("Content-Length", 0))
+        raw = self.rfile.read(content_length) if content_length > 0 else b""
+        ct = self.headers.get("Content-Type", "")
+        if "application/json" in ct:
+            try:
+                params: dict = json.loads(raw.decode("utf-8"))
+            except Exception:
+                params = {}
+        else:
+            params = {k: v[0] for k, v in urllib.parse.parse_qs(raw.decode("utf-8")).items()}
+
+        grant_type = params.get("grant_type", "")
+        if grant_type != "authorization_code":
+            self._send_oauth_json({"error": "unsupported_grant_type"}, 400)
+            return
+
+        code = params.get("code", "")
+        with OAUTH_CODES_LOCK:
+            entry = OAUTH_CODES.get(code)
+            if not entry or entry.get("used"):
+                self._send_oauth_json({"error": "invalid_grant"}, 400)
+                return
+            if time.time() - entry["created_at"] > 600:  # 10 分鐘過期
+                self._send_oauth_json({"error": "invalid_grant", "error_description": "code expired"}, 400)
+                return
+            entry["used"] = True
+
+        access_token = API_TOKEN if API_TOKEN else "handcraft-dev-token"
+        log("OAuth /token → issued access_token")
+        self._send_oauth_json({
+            "access_token": access_token,
+            "token_type": "Bearer",
+            "expires_in": 7776000,  # 90 天
+        })
+
+    def _handle_register(self) -> None:
+        content_length = int(self.headers.get("Content-Length", 0))
+        raw = self.rfile.read(content_length) if content_length > 0 else b""
+        try:
+            meta: dict = json.loads(raw.decode("utf-8"))
+        except Exception:
+            meta = {}
+        self._send_oauth_json({
+            "client_id": str(uuid.uuid4()),
+            "client_secret_expires_at": 0,
+            "redirect_uris": meta.get("redirect_uris", []),
+            "grant_types": ["authorization_code"],
+            "response_types": ["code"],
+            "token_endpoint_auth_method": "none",
+        }, 201)
+
     # ── 主要端點 ──────────────────────────────────────────────────────────────
     def do_POST(self):
-        if self.path != "/mcp":
+        parsed_path = urllib.parse.urlparse(self.path).path
+        if parsed_path == "/token":
+            self._handle_token()
+            return
+        if parsed_path == "/register":
+            self._handle_register()
+            return
+        if parsed_path != "/mcp":
             self.send_response(404)
             self.end_headers()
             return

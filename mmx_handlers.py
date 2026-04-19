@@ -1,8 +1,10 @@
 """MiniMax mmx tool handlers for handcraft-mcp."""
 
 def rmmx(a, t=120):
-    import subprocess as s
-    return s.run(["mmx"] + a, capture_output=True, text=True, timeout=t, shell=False)
+    import subprocess as s, shutil
+    mmx_bin = shutil.which("mmx") or "mmx"
+    # Windows npm .cmd files require shell=True to execute correctly
+    return s.run([mmx_bin] + a, capture_output=True, text=True, timeout=t, shell=True)
 
 def hmi(r, a):
     p = a.get("prompt", "").strip()
