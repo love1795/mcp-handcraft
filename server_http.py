@@ -1292,15 +1292,12 @@ def run_ollama_task(task: str, model: str, working_dir: str) -> tuple[str, bool]
 
 def handle_ollama_agent(req_id, arguments: dict) -> dict:
     sync_args, async_response = maybe_start_async_job(req_id, arguments, "ollama_agent",
-        lambda: run_ollama_task(
-            arguments["task"],
-            arguments.get("model", "qwen3.5:latest"),
-            arguments.get("working_dir", CODEX_DEFAULT_WORKDIR),
-        )
+        lambda t, w: run_ollama_task(t, arguments.get("model", "qwen3.5:latest"), w)
     )
     if async_response is not None:
         return async_response
-    output, is_error = sync_args
+    task, working_dir = sync_args
+    output, is_error = run_ollama_task(task, arguments.get("model", "qwen3.5:latest"), working_dir)
     return make_response(req_id, make_tool_text_response(output, is_error=is_error))
 
 
