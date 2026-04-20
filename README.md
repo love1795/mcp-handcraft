@@ -36,6 +36,7 @@ claude auth login
 
 ## HTTP 版注意事項
 
-- `server_http.py` 目前預設會在 `90` 秒內等 agent 回覆。
+- `server_http.py` 目前預設會在 `300` 秒內等 agent 回覆。
 - 這是為了避免 Cloudflare Tunnel 一類的 HTTP 代理先超時，外面只看到空白或中斷。
 - 若要改長一點，可設定環境變數 `MCP_AGENT_TIMEOUT_SECONDS`。
+- HTTP 端同時提供 Bearer token 驗證與 OAuth metadata 端點，給手動測試與相容客戶端分別使用。

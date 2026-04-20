@@ -1,6 +1,6 @@
 # handcraft-mcp 操作手冊
 
-> 適用版本：0.1.0｜最後更新：2026-04-14
+> 適用版本：0.1.0｜最後更新：2026-04-19
 
 ---
 
@@ -14,7 +14,7 @@
 └── run_http.cmd       ← 啟動 HTTP server（透過 Doppler 注入 key）
 
 Doppler（雲端）
-└── project: handcraft-mcp / config: dev
+└── project: handcraft-mcp / config: prd
     └── 存放所有 API key，啟動時注入，不落地
 
 Cloudflare Tunnel
@@ -28,8 +28,8 @@ Cloudflare Tunnel
 | 用途 | 本機 agent 直連 | 外網 / 遠端呼叫 |
 | 啟動方式 | `run.cmd` | `run_http.cmd` |
 | Port | 無（stdin/stdout） | 8765 |
-| 工具數 | echo | echo + 5 個 agent 工具 |
-| Auth | 無需 | Bearer token |
+| 工具數 | echo | echo + agent / Notion / MiniMax / Ollama 工具 |
+| Auth | 無需 | Bearer token / OAuth metadata |
 
 ---
 
@@ -85,7 +85,7 @@ doppler secrets get MY_API_KEY
 ```
 
 ### Web UI
-https://dashboard.doppler.com → 選 `handcraft-mcp` → `dev`
+https://dashboard.doppler.com → 選 `handcraft-mcp` → `prd`
 
 ### 改完 key 要重啟 server
 Doppler 在啟動時注入，改完 key 要停掉 server 重跑 `run_http.cmd`。
@@ -168,21 +168,34 @@ doppler secrets set MCP_AGENT_TIMEOUT_SECONDS=600
 
 ### Bearer Token（HTTP server）
 
-在 `server_http.py` 第 34 行：
+目前已經從 Doppler 讀取，不再把 token 寫死在 repo：
 ```python
-API_TOKEN = "null$Orchestrator=zer0"
+API_TOKEN = os.getenv("MCP_API_TOKEN", "")
 ```
 
-要換 token：改這行，重啟 server，同時更新客戶端設定。
-
-建議改成從 Doppler 讀取（更安全）：
-```python
-API_TOKEN = os.getenv("MCP_API_TOKEN", "null$Orchestrator=zer0")
-```
-然後：
+要換 token：
 ```bash
 doppler secrets set MCP_API_TOKEN=你的新token
 ```
+
+手動測試 `POST /mcp` 時，仍要自己帶：
+```bash
+-H "Authorization: Bearer <MCP_API_TOKEN>"
+```
+
+### OAuth metadata（相容客戶端可自動發現）
+
+HTTP server 也會提供：
+
+```text
+GET /.well-known/oauth-authorization-server
+GET /.well-known/oauth-protected-resource
+GET /authorize
+POST /token
+POST /register
+```
+
+這是給支援 OAuth / MCP discovery 的 client 用；手動 curl 測試時仍以 Bearer token 最直接。
 
 ### Origin 白名單（DNS rebinding 防護）
 
@@ -236,11 +249,13 @@ run_http.cmd 2> C:\Users\EdgarsTool\Projects\mcp-handcraft\mcp.log
 # 確認 server 正常回應
 curl -X POST http://localhost:8765/mcp \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <MCP_API_TOKEN>" \
   -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-11-25\",\"clientInfo\":{\"name\":\"test\",\"version\":\"1.0\"},\"capabilities\":{}}}"
 
 # 確認外網
 curl -X POST https://mcp.whoasked.vip/mcp \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <MCP_API_TOKEN>" \
   -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\",\"params\":{}}"
 ```
 

@@ -14,6 +14,8 @@
 | 協議版本 | 2025-11-25 |
 | 傳輸方式 | Streamable HTTP (POST) |
 
+> 補充：相容客戶端可透過 `/.well-known/oauth-authorization-server` 與 `/.well-known/oauth-protected-resource` 自動發現 OAuth 設定；手動測試則直接帶 Bearer token。
+
 ---
 
 ## 各客戶端設定方式
@@ -136,7 +138,7 @@ npx mcp-add \
 ```
 輸入：
   task        (string, 必填) — 要執行的任務描述
-  working_dir (string, 選填) — 工作目錄，預設 C:\Users\Windows10-JS
+  working_dir (string, 選填) — 工作目錄，預設 C:\Users\EdgarsTool
 輸出：Codex 執行完成後的最終回覆
 ```
 
@@ -151,12 +153,12 @@ npx mcp-add \
 ```
 輸入：
   task        (string, 必填) — 要執行的程式任務
-  working_dir (string, 選填) — 工作目錄，預設 C:\Users\Windows10-JS
+  working_dir (string, 選填) — 工作目錄，預設 C:\Users\EdgarsTool
 輸出：Claude Code 執行完成後的最終回覆
 ```
 
 **範例：**
-> 請用 claude_code_agent 幫我分析 C:\Users\Windows10-JS\mcp-handcraft\server_http.py 的結構
+> 請用 claude_code_agent 幫我分析 C:\Users\EdgarsTool\Projects\mcp-handcraft\server_http.py 的結構
 
 ---
 
@@ -167,7 +169,14 @@ npx mcp-add \
 ```bash
 curl -X POST https://mcp.whoasked.vip/mcp \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <MCP_API_TOKEN>" \
   -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","clientInfo":{"name":"test","version":"1.0"},"capabilities":{}}}'
+```
+
+`MCP_API_TOKEN` 可用 Doppler 取得：
+
+```bash
+doppler secrets get MCP_API_TOKEN --project handcraft-mcp --config prd --plain
 ```
 
 正常回應：
