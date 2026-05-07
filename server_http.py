@@ -651,6 +651,26 @@ TOOLS = [
             "required": ["url", "script"],
         },
     },
+    # ── 免費圖片生成（Pollinations.AI，不需 API key）─────────────────────────
+    {
+        "name": "image_generate_free",
+        "description": (
+            "Generate an image for FREE using Pollinations.AI (no API key needed). "
+            "Saves PNG to .screenshots/ and returns the file path. "
+            "Models: flux (default, best quality), turbo (fast), gptimage."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "prompt": {"type": "string", "description": "Image description prompt"},
+                "width":  {"type": "integer", "description": "Width in px (default: 1024)"},
+                "height": {"type": "integer", "description": "Height in px (default: 1024)"},
+                "model":  {"type": "string",  "description": "Model: flux (default) | turbo | gptimage"},
+                "seed":   {"type": "integer", "description": "Seed for reproducibility (optional)"},
+            },
+            "required": ["prompt"],
+        },
+    },
     # ── Web Search ────────────────────────────────────────────────────────────
     {
         "name": "web_search",
@@ -1202,6 +1222,10 @@ def handle_tools_call(req_id, params: dict) -> dict:
         return handle_browser_get_text(req_id, arguments)
     if name == "browser_run_script":
         return handle_browser_run_script(req_id, arguments)
+
+    # ── 免費圖片生成
+    if name == "image_generate_free":
+        return handle_image_generate_free(req_id, arguments)
 
     # ── Web Search
     if name == "web_search":
@@ -2069,6 +2093,43 @@ def handle_git_commit(req_id, arguments: dict) -> dict:
     return make_response(req_id, make_tool_text_response(
         f"Stage:\n{add_out}\n\nCommit:\n{commit_out}", is_error=commit_err
     ))
+
+
+# ─── Free Image Generation (Pollinations.AI) ─────────────────────────────────
+
+def handle_image_generate_free(req_id, arguments: dict) -> dict:
+    prompt = arguments.get("prompt", "").strip()
+    if not prompt:
+        return make_response(req_id, make_tool_text_response("Error: prompt is required", is_error=True))
+    width  = int(arguments.get("width",  1024))
+    height = int(arguments.get("height", 1024))
+    model  = arguments.get("model", "flux").strip() or "flux"
+    seed   = arguments.get("seed")
+
+    try:
+        encoded = urllib.parse.quote(prompt)
+        url = f"https://image.pollinations.ai/prompt/{encoded}?width={width}&height={height}&model={model}&nologo=true"
+        if seed is not None:
+            url += f"&seed={seed}"
+
+        log(f"image_generate_free: fetching {url}")
+        req = urllib.request.Request(url, headers={"User-Agent": "handcraft-mcp/1.0"})
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            img_bytes = resp.read()
+
+        SCREENSHOTS_DIR.mkdir(parents=True, exist_ok=True)
+        ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        fname = SCREENSHOTS_DIR / f"pollinations_{ts}.png"
+        fname.write_bytes(img_bytes)
+
+        return make_response(req_id, make_tool_text_response(
+            f"Image saved: {fname}\n"
+            f"Prompt: {prompt}\n"
+            f"Model: {model}  Size: {width}x{height}  ({len(img_bytes):,} bytes)\n"
+            f"Source: Pollinations.AI (free, no key)"
+        ))
+    except Exception as e:
+        return make_response(req_id, make_tool_text_response(f"Error: {e}", is_error=True))
 
 
 # ─── Playwright Handlers ─────────────────────────────────────────────────────
