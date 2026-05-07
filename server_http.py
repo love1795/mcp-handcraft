@@ -18,6 +18,11 @@ import uuid
 import shutil
 import urllib.parse
 import urllib.request
+import fnmatch
+import platform
+import string
+import datetime
+from pathlib import Path
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from socketserver import ThreadingMixIn
 from mmx_handlers import DISPATCH, hmi, hmvd, hms, hmu, hmv, hmsq, hmc, hmq
@@ -439,6 +444,166 @@ TOOLS = [
                 "working_dir": {"type": "string", "description": f"Working directory (default: {CODEX_DEFAULT_WORKDIR})"},
             },
             "required": ["task"],
+        },
+    },
+    # ── 檔案系統工具 ──────────────────────────────────────────────────────────
+    {
+        "name": "fs_list",
+        "description": "List directory contents with file sizes, types, and modification dates.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string", "description": "Directory path to list"},
+                "show_hidden": {"type": "boolean", "description": "Include hidden files/folders (default: false)"},
+            },
+            "required": ["path"],
+        },
+    },
+    {
+        "name": "fs_read",
+        "description": "Read the contents of a file. Truncates at max_lines to avoid overloading context.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string", "description": "File path to read"},
+                "max_lines": {"type": "integer", "description": "Max lines to return (default: 200)"},
+            },
+            "required": ["path"],
+        },
+    },
+    {
+        "name": "fs_write",
+        "description": "Write or create a file. Can append to existing file.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string", "description": "File path to write"},
+                "content": {"type": "string", "description": "Content to write"},
+                "append": {"type": "boolean", "description": "Append instead of overwrite (default: false)"},
+            },
+            "required": ["path", "content"],
+        },
+    },
+    {
+        "name": "fs_move",
+        "description": "Move or rename a file or folder.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "src": {"type": "string", "description": "Source path"},
+                "dst": {"type": "string", "description": "Destination path"},
+            },
+            "required": ["src", "dst"],
+        },
+    },
+    {
+        "name": "fs_delete",
+        "description": "Safely delete a file or folder by moving it to a trash folder (C:\\Users\\EdgarsTool\\.mcp-trash). NOT permanent — can be recovered manually.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string", "description": "File or folder path to delete (moved to trash)"},
+            },
+            "required": ["path"],
+        },
+    },
+    {
+        "name": "fs_search",
+        "description": "Search for files by name pattern (glob) and optionally by content substring.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "directory": {"type": "string", "description": "Root directory to search in"},
+                "pattern": {"type": "string", "description": "Filename glob pattern (e.g. '*.py', '*.md', default: '*')"},
+                "search_content": {"type": "string", "description": "Optional substring to search inside file contents"},
+                "max_results": {"type": "integer", "description": "Max results to return (default: 50)"},
+            },
+            "required": ["directory"],
+        },
+    },
+    {
+        "name": "fs_disk_info",
+        "description": "Show disk usage for all drives (used/free/total space with visual bar).",
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+    # ── 系統工具 ──────────────────────────────────────────────────────────────
+    {
+        "name": "sys_run",
+        "description": "Run a PowerShell command on the local machine and return output. Timeout max 120s. Dangerous patterns are blocked.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "command": {"type": "string", "description": "PowerShell command to execute"},
+                "working_dir": {"type": "string", "description": "Working directory (default: user home)"},
+                "timeout": {"type": "integer", "description": "Timeout in seconds (default: 30, max: 120)"},
+            },
+            "required": ["command"],
+        },
+    },
+    {
+        "name": "sys_info",
+        "description": "Get system information: CPU, RAM usage, OS version.",
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "sys_processes",
+        "description": "List running processes sorted by memory or CPU usage.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "limit": {"type": "integer", "description": "Number of processes to return (default: 20)"},
+                "sort_by": {"type": "string", "description": "Sort by: 'memory' (default), 'cpu', or 'name'"},
+            },
+        },
+    },
+    # ── Git 工具 ─────────────────────────────────────────────────────────────
+    {
+        "name": "git_status",
+        "description": "Show git working tree status for a repository.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "repo_path": {"type": "string", "description": f"Repo path (default: {CODEX_DEFAULT_WORKDIR})"},
+            },
+        },
+    },
+    {
+        "name": "git_log",
+        "description": "Show recent git commit history (one-line format).",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "repo_path": {"type": "string", "description": "Repo path"},
+                "limit": {"type": "integer", "description": "Number of commits (default: 10)"},
+            },
+        },
+    },
+    {
+        "name": "git_diff",
+        "description": "Show git diff summary (changed files and line counts).",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "repo_path": {"type": "string", "description": "Repo path"},
+                "staged": {"type": "boolean", "description": "Show staged diff (default: false = unstaged)"},
+            },
+        },
+    },
+    {
+        "name": "git_commit",
+        "description": "Stage files and create a git commit.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "repo_path": {"type": "string", "description": "Repo path"},
+                "message": {"type": "string", "description": "Commit message"},
+                "files": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Files to stage (empty = git add -A for all changes)",
+                },
+            },
+            "required": ["message"],
         },
     },
 ]
@@ -898,6 +1063,40 @@ def handle_tools_call(req_id, params: dict) -> dict:
 
     if name == "ollama_agent":
         return handle_ollama_agent(req_id, arguments)
+
+    # ── 檔案系統
+    if name == "fs_list":
+        return handle_fs_list(req_id, arguments)
+    if name == "fs_read":
+        return handle_fs_read(req_id, arguments)
+    if name == "fs_write":
+        return handle_fs_write(req_id, arguments)
+    if name == "fs_move":
+        return handle_fs_move(req_id, arguments)
+    if name == "fs_delete":
+        return handle_fs_delete(req_id, arguments)
+    if name == "fs_search":
+        return handle_fs_search(req_id, arguments)
+    if name == "fs_disk_info":
+        return handle_fs_disk_info(req_id, arguments)
+
+    # ── 系統
+    if name == "sys_run":
+        return handle_sys_run(req_id, arguments)
+    if name == "sys_info":
+        return handle_sys_info(req_id, arguments)
+    if name == "sys_processes":
+        return handle_sys_processes(req_id, arguments)
+
+    # ── Git
+    if name == "git_status":
+        return handle_git_status(req_id, arguments)
+    if name == "git_log":
+        return handle_git_log(req_id, arguments)
+    if name == "git_diff":
+        return handle_git_diff(req_id, arguments)
+    if name == "git_commit":
+        return handle_git_commit(req_id, arguments)
 
     return make_response(req_id, make_tool_text_response(f"Unknown tool: {name}", is_error=True))
 
@@ -1422,6 +1621,337 @@ def handle_ollama_agent(req_id, arguments: dict) -> dict:
     task, working_dir = sync_args
     output, is_error = run_ollama_task(task, arguments.get("model", "qwen3.5:latest"), working_dir)
     return make_response(req_id, make_tool_text_response(output, is_error=is_error))
+
+
+# ─── File System Handlers ────────────────────────────────────────────────────
+
+MCP_TRASH_DIR = Path(r"C:\Users\EdgarsTool\.mcp-trash")
+
+
+def handle_fs_list(req_id, arguments: dict) -> dict:
+    path = arguments.get("path", "").strip()
+    show_hidden = arguments.get("show_hidden", False)
+    if not path:
+        return make_response(req_id, make_tool_text_response("Error: path is required", is_error=True))
+    try:
+        p = Path(path)
+        if not p.exists():
+            return make_response(req_id, make_tool_text_response(f"Error: path does not exist: {path}", is_error=True))
+        if not p.is_dir():
+            return make_response(req_id, make_tool_text_response(f"Error: not a directory: {path}", is_error=True))
+        entries = []
+        for item in sorted(p.iterdir(), key=lambda x: (x.is_file(), x.name.lower())):
+            if not show_hidden and item.name.startswith("."):
+                continue
+            try:
+                stat = item.stat()
+                mtime = datetime.datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M")
+                kind = "DIR " if item.is_dir() else "FILE"
+                size_str = f"{stat.st_size:>12,}" if item.is_file() else "           —"
+                entries.append(f"{kind}  {mtime}  {size_str}  {item.name}")
+            except (PermissionError, OSError):
+                entries.append(f"???   (permission denied)              {item.name}")
+        header = f"Directory: {path}\n{len(entries)} item(s)\n" + "─" * 65
+        body = "\n".join(entries) if entries else "(empty)"
+        return make_response(req_id, make_tool_text_response(f"{header}\n{body}"))
+    except Exception as e:
+        return make_response(req_id, make_tool_text_response(f"Error: {e}", is_error=True))
+
+
+def handle_fs_read(req_id, arguments: dict) -> dict:
+    path = arguments.get("path", "").strip()
+    max_lines = int(arguments.get("max_lines", 200))
+    if not path:
+        return make_response(req_id, make_tool_text_response("Error: path is required", is_error=True))
+    try:
+        p = Path(path)
+        if not p.exists():
+            return make_response(req_id, make_tool_text_response(f"Error: file not found: {path}", is_error=True))
+        if not p.is_file():
+            return make_response(req_id, make_tool_text_response(f"Error: not a file: {path}", is_error=True))
+        size = p.stat().st_size
+        if size > 5 * 1024 * 1024:
+            return make_response(req_id, make_tool_text_response(
+                f"Error: file too large ({size:,} bytes). Max 5MB.", is_error=True
+            ))
+        content = p.read_text(encoding="utf-8", errors="replace")
+        lines = content.splitlines()
+        total = len(lines)
+        if total > max_lines:
+            body = "\n".join(lines[:max_lines]) + f"\n... (showing {max_lines}/{total} lines)"
+        else:
+            body = content
+        return make_response(req_id, make_tool_text_response(
+            f"File: {path} ({size:,} bytes, {total} lines)\n---\n{body}"
+        ))
+    except Exception as e:
+        return make_response(req_id, make_tool_text_response(f"Error: {e}", is_error=True))
+
+
+def handle_fs_write(req_id, arguments: dict) -> dict:
+    path = arguments.get("path", "").strip()
+    content = arguments.get("content", "")
+    append = arguments.get("append", False)
+    if not path:
+        return make_response(req_id, make_tool_text_response("Error: path is required", is_error=True))
+    try:
+        p = Path(path)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        mode = "a" if append else "w"
+        with open(p, mode, encoding="utf-8") as f:
+            f.write(content)
+        action = "Appended to" if append else "Written"
+        size = p.stat().st_size
+        return make_response(req_id, make_tool_text_response(f"{action}: {path} ({size:,} bytes)"))
+    except Exception as e:
+        return make_response(req_id, make_tool_text_response(f"Error: {e}", is_error=True))
+
+
+def handle_fs_move(req_id, arguments: dict) -> dict:
+    src = arguments.get("src", "").strip()
+    dst = arguments.get("dst", "").strip()
+    if not src or not dst:
+        return make_response(req_id, make_tool_text_response("Error: src and dst are required", is_error=True))
+    try:
+        src_p = Path(src)
+        dst_p = Path(dst)
+        if not src_p.exists():
+            return make_response(req_id, make_tool_text_response(f"Error: source not found: {src}", is_error=True))
+        dst_p.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(src_p), str(dst_p))
+        return make_response(req_id, make_tool_text_response(f"Moved: {src} → {dst}"))
+    except Exception as e:
+        return make_response(req_id, make_tool_text_response(f"Error: {e}", is_error=True))
+
+
+def handle_fs_delete(req_id, arguments: dict) -> dict:
+    path = arguments.get("path", "").strip()
+    if not path:
+        return make_response(req_id, make_tool_text_response("Error: path is required", is_error=True))
+    try:
+        p = Path(path)
+        if not p.exists():
+            return make_response(req_id, make_tool_text_response(f"Error: not found: {path}", is_error=True))
+        MCP_TRASH_DIR.mkdir(parents=True, exist_ok=True)
+        ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        trash_dest = MCP_TRASH_DIR / f"{ts}_{p.name}"
+        shutil.move(str(p), str(trash_dest))
+        return make_response(req_id, make_tool_text_response(
+            f"Moved to trash: {path}\nTrash location: {trash_dest}\nTo restore: move it back manually."
+        ))
+    except Exception as e:
+        return make_response(req_id, make_tool_text_response(f"Error: {e}", is_error=True))
+
+
+def handle_fs_search(req_id, arguments: dict) -> dict:
+    directory = arguments.get("directory", "").strip()
+    pattern = arguments.get("pattern", "*").strip()
+    search_content = arguments.get("search_content", "")
+    max_results = int(arguments.get("max_results", 50))
+    if not directory:
+        return make_response(req_id, make_tool_text_response("Error: directory is required", is_error=True))
+    try:
+        d = Path(directory)
+        if not d.exists():
+            return make_response(req_id, make_tool_text_response(f"Error: directory not found: {directory}", is_error=True))
+        matches = []
+        for root, dirs, files in os.walk(str(d)):
+            dirs[:] = [dd for dd in dirs if not dd.startswith(".")]
+            for fname in files:
+                if fnmatch.fnmatch(fname.lower(), pattern.lower()):
+                    fpath = Path(root) / fname
+                    if search_content:
+                        try:
+                            text = fpath.read_text(encoding="utf-8", errors="replace")
+                            if search_content.lower() in text.lower():
+                                matches.append(str(fpath))
+                        except (PermissionError, OSError):
+                            pass
+                    else:
+                        matches.append(str(fpath))
+                if len(matches) >= max_results:
+                    break
+            if len(matches) >= max_results:
+                break
+        if not matches:
+            note = f" containing '{search_content}'" if search_content else ""
+            return make_response(req_id, make_tool_text_response(
+                f"No files matching '{pattern}'{note} found in {directory}"
+            ))
+        result = f"Found {len(matches)} file(s) (limit {max_results}):\n" + "\n".join(matches)
+        return make_response(req_id, make_tool_text_response(result))
+    except Exception as e:
+        return make_response(req_id, make_tool_text_response(f"Error: {e}", is_error=True))
+
+
+def handle_fs_disk_info(req_id, arguments: dict) -> dict:
+    try:
+        lines = ["Disk Usage", "─" * 55]
+        for letter in string.ascii_uppercase:
+            drive = f"{letter}:\\"
+            if os.path.exists(drive):
+                try:
+                    usage = shutil.disk_usage(drive)
+                    total_gb = usage.total / (1024 ** 3)
+                    used_gb = usage.used / (1024 ** 3)
+                    free_gb = usage.free / (1024 ** 3)
+                    pct = usage.used / usage.total * 100 if usage.total > 0 else 0
+                    bar = "█" * int(pct / 5) + "░" * (20 - int(pct / 5))
+                    lines.append(
+                        f"{drive}  [{bar}] {pct:4.0f}%  "
+                        f"{used_gb:.1f}/{total_gb:.1f} GB  free: {free_gb:.1f} GB"
+                    )
+                except (PermissionError, OSError):
+                    lines.append(f"{drive}  (inaccessible)")
+        return make_response(req_id, make_tool_text_response("\n".join(lines)))
+    except Exception as e:
+        return make_response(req_id, make_tool_text_response(f"Error: {e}", is_error=True))
+
+
+# ─── System Handlers ─────────────────────────────────────────────────────────
+
+_BLOCKED_PATTERNS = [
+    "format ", "format.com", "diskpart", "del /f /s /q c:\\",
+    "rmdir /s /q c:\\", "rd /s /q c:\\", "rm -rf /", "dd if=",
+    "reg delete hklm", "bcdedit", "shutdown /r /o",
+]
+
+
+def handle_sys_run(req_id, arguments: dict) -> dict:
+    command = arguments.get("command", "").strip()
+    working_dir = arguments.get("working_dir", str(Path.home())).strip()
+    timeout = min(int(arguments.get("timeout", 30)), 120)
+    if not command:
+        return make_response(req_id, make_tool_text_response("Error: command is required", is_error=True))
+    cmd_lower = command.lower()
+    for blocked in _BLOCKED_PATTERNS:
+        if blocked in cmd_lower:
+            return make_response(req_id, make_tool_text_response(
+                f"Error: blocked command pattern: '{blocked}'", is_error=True
+            ))
+    try:
+        cwd = working_dir if os.path.exists(working_dir) else str(Path.home())
+        result = subprocess.run(
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command", command],
+            capture_output=True, text=True, timeout=timeout, cwd=cwd, shell=False,
+        )
+        parts = [f"Exit code: {result.returncode}"]
+        if result.stdout.strip():
+            parts.append(f"STDOUT:\n{result.stdout.strip()}")
+        if result.stderr.strip():
+            parts.append(f"STDERR:\n{result.stderr.strip()}")
+        return make_response(req_id, make_tool_text_response(
+            "\n\n".join(parts), is_error=(result.returncode != 0)
+        ))
+    except subprocess.TimeoutExpired:
+        return make_response(req_id, make_tool_text_response(
+            f"Error: timed out after {timeout}s", is_error=True
+        ))
+    except Exception as e:
+        return make_response(req_id, make_tool_text_response(f"Error: {e}", is_error=True))
+
+
+def handle_sys_info(req_id, arguments: dict) -> dict:
+    try:
+        lines = [f"OS: {platform.platform()}", f"Python: {sys.version.split()[0]}"]
+        cpu_r = subprocess.run(
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command",
+             "Get-CimInstance Win32_Processor | Select-Object -First 1 | "
+             "ForEach-Object { \"CPU: $($_.Name) | Cores: $($_.NumberOfCores) | Logical: $($_.NumberOfLogicalProcessors)\" }"],
+            capture_output=True, text=True, timeout=10, shell=False,
+        )
+        if cpu_r.stdout.strip():
+            lines.append(cpu_r.stdout.strip())
+        ram_r = subprocess.run(
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command",
+             "$os = Get-CimInstance Win32_OperatingSystem; "
+             "$total = [math]::Round($os.TotalVisibleMemorySize/1MB,1); "
+             "$free = [math]::Round($os.FreePhysicalMemory/1MB,1); "
+             "$used = [math]::Round($total - $free,1); "
+             "\"RAM: ${used}GB used / ${total}GB total (${free}GB free)\""],
+            capture_output=True, text=True, timeout=10, shell=False,
+        )
+        if ram_r.stdout.strip():
+            lines.append(ram_r.stdout.strip())
+        return make_response(req_id, make_tool_text_response("\n".join(lines)))
+    except Exception as e:
+        return make_response(req_id, make_tool_text_response(f"Error: {e}", is_error=True))
+
+
+def handle_sys_processes(req_id, arguments: dict) -> dict:
+    limit = int(arguments.get("limit", 20))
+    sort_by = arguments.get("sort_by", "memory")
+    sort_prop = {"memory": "WorkingSet", "cpu": "CPU", "name": "Name"}.get(sort_by, "WorkingSet")
+    sort_dir = "Ascending" if sort_by == "name" else "Descending"
+    try:
+        ps_cmd = (
+            f"Get-Process | Sort-Object {sort_prop} -{sort_dir} | Select-Object -First {limit} | "
+            "Format-Table Name, Id, @{N='Mem(MB)';E={[math]::Round($_.WorkingSet/1MB,1)}}, CPU -AutoSize | "
+            "Out-String -Width 100"
+        )
+        result = subprocess.run(
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps_cmd],
+            capture_output=True, text=True, timeout=20, shell=False,
+        )
+        return make_response(req_id, make_tool_text_response(
+            f"Top {limit} processes (sorted by {sort_by}):\n{result.stdout.strip()}"
+        ))
+    except Exception as e:
+        return make_response(req_id, make_tool_text_response(f"Error: {e}", is_error=True))
+
+
+# ─── Git Handlers ─────────────────────────────────────────────────────────────
+
+def _git(args: list[str], cwd: str, timeout: int = 15) -> tuple[str, bool]:
+    try:
+        result = subprocess.run(
+            ["git"] + args,
+            capture_output=True, text=True, timeout=timeout, cwd=cwd, shell=False,
+        )
+        out = (result.stdout + result.stderr).strip()
+        return out, result.returncode != 0
+    except subprocess.TimeoutExpired:
+        return f"git timed out after {timeout}s", True
+    except Exception as e:
+        return str(e), True
+
+
+def handle_git_status(req_id, arguments: dict) -> dict:
+    repo = arguments.get("repo_path", "").strip() or CODEX_DEFAULT_WORKDIR
+    out, err = _git(["status"], repo)
+    return make_response(req_id, make_tool_text_response(out, is_error=err))
+
+
+def handle_git_log(req_id, arguments: dict) -> dict:
+    repo = arguments.get("repo_path", "").strip() or CODEX_DEFAULT_WORKDIR
+    limit = int(arguments.get("limit", 10))
+    out, err = _git(["log", f"--max-count={limit}", "--oneline", "--decorate"], repo)
+    return make_response(req_id, make_tool_text_response(out, is_error=err))
+
+
+def handle_git_diff(req_id, arguments: dict) -> dict:
+    repo = arguments.get("repo_path", "").strip() or CODEX_DEFAULT_WORKDIR
+    staged = arguments.get("staged", False)
+    args = ["diff", "--stat"] + (["--cached"] if staged else [])
+    out, err = _git(args, repo)
+    if not out.strip():
+        out = "(no diff — working tree is clean)"
+    return make_response(req_id, make_tool_text_response(out, is_error=err))
+
+
+def handle_git_commit(req_id, arguments: dict) -> dict:
+    repo = arguments.get("repo_path", "").strip() or CODEX_DEFAULT_WORKDIR
+    message = arguments.get("message", "").strip()
+    files = arguments.get("files", [])
+    if not message:
+        return make_response(req_id, make_tool_text_response("Error: message is required", is_error=True))
+    add_out, add_err = _git(["add"] + files, repo) if files else _git(["add", "-A"], repo)
+    if add_err and "nothing to commit" not in add_out:
+        return make_response(req_id, make_tool_text_response(f"Stage failed:\n{add_out}", is_error=True))
+    commit_out, commit_err = _git(["commit", "-m", message], repo)
+    return make_response(req_id, make_tool_text_response(
+        f"Stage:\n{add_out}\n\nCommit:\n{commit_out}", is_error=commit_err
+    ))
 
 
 if __name__ == "__main__":
