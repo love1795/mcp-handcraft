@@ -6,12 +6,16 @@ def rmmx(a, t=120):
     # Windows npm .cmd files require shell=True to execute correctly
     return s.run([mmx_bin] + a, capture_output=True, text=True, timeout=t, shell=True)
 
+_DEFAULT_IMG_DIR = r"C:\Users\EdgarsTool\Projects\mcp-handcraft\.screenshots"
+
 def hmi(r, a):
     p = a.get("prompt", "").strip()
     if not p:
         return {"jsonrpc": "2.0", "id": r, "result": {"content": [{"type": "text", "text": "Error: prompt required"}], "isError": True}}
-    args = ["image", "generate", "--prompt", p, "--output", "json", "--quiet"]
-    for k, v in [("aspect_ratio", "--aspect-ratio"), ("n", "--n"), ("out_dir", "--out-dir")]:
+    import os; os.makedirs(_DEFAULT_IMG_DIR, exist_ok=True)
+    out_dir = a.get("out_dir") or _DEFAULT_IMG_DIR
+    args = ["image", "generate", "--prompt", p, "--output", "json", "--quiet", "--out-dir", str(out_dir)]
+    for k, v in [("aspect_ratio", "--aspect-ratio"), ("n", "--n")]:
         if a.get(k):
             args.append(v)
             args.append(str(a[k]))
