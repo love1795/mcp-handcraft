@@ -26,9 +26,18 @@ mcp-handcraft/
 
 ### 正常啟動（透過 Doppler 注入 secrets）
 
+HTTP server 啟動前必須有 `MCP_API_TOKEN`，且不能是空字串或只有空白；未設定時程式會直接拒絕啟動。
+
 ```powershell
 cd C:\Users\EdgarsTool\Projects\mcp-handcraft
 doppler run -- python server_http.py
+```
+
+不透過 Doppler 的最小本機範例：
+
+```powershell
+$env:MCP_API_TOKEN = "replace-with-a-long-random-token"
+python server_http.py
 ```
 
 ### 背景啟動
@@ -60,6 +69,7 @@ Stop-Process -Id (Get-NetTCPConnection -LocalPort 8765).OwningProcess -Force
 |------|------|
 | Python | 3.11+ |
 | Doppler | secrets 管理，project `handcraft-mcp`，config `prd` |
+| `MCP_API_TOKEN` | HTTP server 必填 Bearer token，未設定、空字串或只有空白會 fail-fast |
 | Playwright | `playwright install chromium`（browser 工具需要） |
 | Claude Code | `winget install Anthropic.ClaudeCode` + `claude auth login` |
 | Ollama | 本地模型執行環境 |
@@ -75,7 +85,7 @@ Stop-Process -Id (Get-NetTCPConnection -LocalPort 8765).OwningProcess -Force
 Authorization: Bearer <MCP_API_TOKEN>
 ```
 
-Token 由 Doppler 管理（`MCP_API_TOKEN`）。
+Token 由 Doppler 管理（`MCP_API_TOKEN`），HTTP server 啟動前必須注入此值。
 
 ---
 
@@ -262,7 +272,7 @@ doppler run -- python -m unittest test_server_http.py -v
 
 | 變數 | 說明 |
 |------|------|
-| `MCP_API_TOKEN` | Bearer Token 認證 |
+| `MCP_API_TOKEN` | 必填 Bearer Token 認證；未設定、空字串或只有空白時 HTTP server 會拒絕啟動 |
 | `PERPLEXITY_API_KEY` | web_search 用 |
 | `OPENAI_API_KEY` | 備用 |
 | `LINEAR_API_KEY` | Linear issue 管理 |

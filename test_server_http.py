@@ -2,6 +2,7 @@
 
 import subprocess
 import unittest
+from unittest.mock import patch
 
 import server_http
 from server_http import (
@@ -79,6 +80,48 @@ class ServerHttpJobApiTests(unittest.TestCase):
         response = handle_agent_job_cleanup(req_id=1, arguments={})
         text = response["result"]["content"][0]["text"]
         self.assertIn("Expired jobs removed: 1", text)
+
+
+class ServerHttpStartupTests(unittest.TestCase):
+    def test_main_starts_when_mcp_api_token_is_valid(self):
+        with patch.dict("os.environ", {"MCP_API_TOKEN": "token-value"}, clear=True):
+            with patch.object(server_http, "ThreadingHTTPServer") as server_cls:
+                server = server_cls.return_value
+                server.serve_forever.side_effect = KeyboardInterrupt
+
+                server_http.main()
+
+        self.assertEqual("token-value", server_http.API_TOKEN)
+        server_cls.assert_called_once_with(("0.0.0.0", server_http.PORT), server_http.MCPHTTPHandler)
+        server.serve_forever.assert_called_once_with()
+        server.server_close.assert_called_once_with()
+
+    def test_main_fails_before_binding_when_mcp_api_token_is_unset(self):
+        with patch.dict("os.environ", {}, clear=True):
+            with patch.object(server_http, "ThreadingHTTPServer") as server_cls:
+                with self.assertRaises(SystemExit) as raised:
+                    server_http.main()
+
+        self.assertEqual(1, raised.exception.code)
+        server_cls.assert_not_called()
+
+    def test_main_fails_before_binding_when_mcp_api_token_is_empty(self):
+        with patch.dict("os.environ", {"MCP_API_TOKEN": ""}, clear=True):
+            with patch.object(server_http, "ThreadingHTTPServer") as server_cls:
+                with self.assertRaises(SystemExit) as raised:
+                    server_http.main()
+
+        self.assertEqual(1, raised.exception.code)
+        server_cls.assert_not_called()
+
+    def test_main_fails_before_binding_when_mcp_api_token_is_whitespace(self):
+        with patch.dict("os.environ", {"MCP_API_TOKEN": "   \t\r\n"}, clear=True):
+            with patch.object(server_http, "ThreadingHTTPServer") as server_cls:
+                with self.assertRaises(SystemExit) as raised:
+                    server_http.main()
+
+        self.assertEqual(1, raised.exception.code)
+        server_cls.assert_not_called()
 
 
 class ClaudeCodeAgentSmokeTests(unittest.TestCase):

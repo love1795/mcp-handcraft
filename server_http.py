@@ -889,6 +889,14 @@ def log(msg: str) -> None:
     print(f"[MCP-HTTP] {msg}", file=sys.stderr, flush=True)
 
 
+def require_mcp_api_token() -> str:
+    token = os.getenv("MCP_API_TOKEN")
+    if token is None or not token.strip():
+        log("MCP_API_TOKEN is required and must be a non-empty string. Refusing to start.")
+        raise SystemExit(1)
+    return token
+
+
 def make_response(req_id, result: dict) -> dict:
     return {"jsonrpc": "2.0", "id": req_id, "result": result}
 
@@ -1890,6 +1898,8 @@ class MCPHTTPHandler(BaseHTTPRequestHandler):
 # ─── 主程式 ───────────────────────────────────────────────────────────────────
 
 def main() -> None:
+    global API_TOKEN
+    API_TOKEN = require_mcp_api_token()
     server = ThreadingHTTPServer(("0.0.0.0", PORT), MCPHTTPHandler)
     log(f"handcraft-mcp HTTP server starting")
     log(f"Protocol : {PROTOCOL_VERSION}")
