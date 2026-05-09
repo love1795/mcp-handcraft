@@ -2,6 +2,7 @@
 
 import subprocess
 import unittest
+from unittest.mock import patch
 
 import server_http
 from server_http import (
@@ -79,6 +80,31 @@ class ServerHttpJobApiTests(unittest.TestCase):
         response = handle_agent_job_cleanup(req_id=1, arguments={})
         text = response["result"]["content"][0]["text"]
         self.assertIn("Expired jobs removed: 1", text)
+
+
+class ServerHttpStartupTests(unittest.TestCase):
+    def test_require_mcp_api_token_rejects_missing_empty_and_whitespace(self):
+        for value in (None, "", "   "):
+            with self.subTest(value=value):
+                env = {} if value is None else {"MCP_API_TOKEN": value}
+                with patch.dict("os.environ", env, clear=True):
+                    with self.assertRaises(SystemExit) as raised:
+                        server_http.require_mcp_api_token()
+
+                self.assertEqual(1, raised.exception.code)
+
+    def test_main_fails_before_binding_when_mcp_api_token_is_blank(self):
+        with patch.dict("os.environ", {"MCP_API_TOKEN": "   "}, clear=True):
+            with patch.object(server_http, "ThreadingHTTPServer") as server_cls:
+                with self.assertRaises(SystemExit) as raised:
+                    server_http.main()
+
+        self.assertEqual(1, raised.exception.code)
+        server_cls.assert_not_called()
+
+    def test_require_mcp_api_token_accepts_non_empty_value(self):
+        with patch.dict("os.environ", {"MCP_API_TOKEN": "token-value"}, clear=True):
+            self.assertEqual("token-value", server_http.require_mcp_api_token())
 
 
 class ClaudeCodeAgentSmokeTests(unittest.TestCase):
