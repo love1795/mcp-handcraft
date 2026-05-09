@@ -36,9 +36,18 @@ Cloudflare Tunnel
 ## 2. 啟動 / 停止
 
 ### 啟動 HTTP server（常用）
+`MCP_API_TOKEN` 是 HTTP server 必填設定。若 Doppler 未注入、值是空字串、或只有空白，server 會在建立 HTTP listener 前拒絕啟動。
+
 ```cmd
 cd C:\Users\EdgarsTool\Projects\mcp-handcraft
 run_http.cmd
+```
+
+不透過 Doppler 的最小本機範例：
+
+```powershell
+$env:MCP_API_TOKEN = "replace-with-a-long-random-token"
+python server_http.py
 ```
 
 ### 啟動 stdio server（本機 MCP client 用）
@@ -154,6 +163,7 @@ def handle_my_tool(req_id, arguments: dict) -> dict:
 
 | 變數名稱 | 預設值 | 說明 |
 |---|---|---|
+| `MCP_API_TOKEN` | 無 | HTTP server 必填 Bearer token；未設定、空字串或只有空白時會 fail-fast |
 | `MCP_AGENT_TIMEOUT_SECONDS` | `300` | agent 指令最長執行秒數 |
 | `MCP_JOB_RETENTION_SECONDS` | `3600` | 背景 job 結果保留時間（秒） |
 
@@ -168,18 +178,16 @@ doppler secrets set MCP_AGENT_TIMEOUT_SECONDS=600
 
 ### Bearer Token（HTTP server）
 
-在 `server_http.py` 第 34 行：
+`MCP_API_TOKEN` 由 Doppler 注入，HTTP server 啟動前會檢查此值：
+
 ```python
-API_TOKEN = "null$Orchestrator=zer0"
+API_TOKEN = os.getenv("MCP_API_TOKEN", "")
 ```
 
-要換 token：改這行，重啟 server，同時更新客戶端設定。
+若未設定、空字串或只有空白，server 會輸出 `MCP_API_TOKEN is required and must be a non-empty string. Refusing to start.`，以非 0 狀態結束，且不會開始監聽 `:8765`。
 
-建議改成從 Doppler 讀取（更安全）：
-```python
-API_TOKEN = os.getenv("MCP_API_TOKEN", "null$Orchestrator=zer0")
-```
-然後：
+要換 token：更新 Doppler 後重啟 server，同時更新客戶端設定。
+
 ```bash
 doppler secrets set MCP_API_TOKEN=你的新token
 ```
