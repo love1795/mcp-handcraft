@@ -2,6 +2,7 @@
 
 import subprocess
 import unittest
+from unittest.mock import patch
 
 import server_http
 from server_http import (
@@ -9,6 +10,9 @@ from server_http import (
     JOBS_LOCK,
     DISCORD_WEBHOOK_EVENTS,
     DISCORD_WEBHOOK_EVENTS_LOCK,
+    HandcraftServerConfig,
+    MCPHTTPHandler,
+    ThreadingHTTPServer,
     TOOLS,
     cleanup_expired_jobs,
     create_job,
@@ -20,6 +24,7 @@ from server_http import (
     handle_tools_list,
     list_jobs,
     update_job,
+    validate_http_startup_config,
     validate_mcp_api_token,
 )
 
@@ -94,6 +99,38 @@ class HttpStartupConfigTests(unittest.TestCase):
 
     def test_mcp_api_token_trims_configured_value(self):
         self.assertEqual("secret-token", validate_mcp_api_token("  secret-token  "))
+
+    def test_http_startup_config_reads_environment_into_config_object(self):
+        with patch.dict(
+            "os.environ",
+            {
+                "MCP_API_TOKEN": "  secret-token  ",
+                "MCP_BASE_URL": "  https://mcp.example.test  ",
+            },
+        ):
+            config = validate_http_startup_config()
+
+        self.assertEqual(
+            HandcraftServerConfig(
+                mcp_api_token="secret-token",
+                base_url="https://mcp.example.test",
+            ),
+            config,
+        )
+
+    def test_http_servers_keep_separate_auth_config(self):
+        first_config = HandcraftServerConfig(mcp_api_token="first-token", base_url="https://first.example")
+        second_config = HandcraftServerConfig(mcp_api_token="second-token", base_url="https://second.example")
+        first_server = ThreadingHTTPServer(("127.0.0.1", 0), MCPHTTPHandler, config=first_config)
+        second_server = ThreadingHTTPServer(("127.0.0.1", 0), MCPHTTPHandler, config=second_config)
+        try:
+            self.assertEqual("first-token", first_server.config.mcp_api_token)
+            self.assertEqual("second-token", second_server.config.mcp_api_token)
+            self.assertEqual("https://first.example", first_server.config.base_url)
+            self.assertEqual("https://second.example", second_server.config.base_url)
+        finally:
+            first_server.server_close()
+            second_server.server_close()
 
 
 class DiscordWebhookTests(unittest.TestCase):
